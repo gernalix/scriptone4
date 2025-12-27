@@ -370,3 +370,39 @@ def fetch_incremental(library_id: str, *, modified_after_iso: Optional[str], lim
         rows = out
 
     return rows
+
+
+def fetch_entry_detail(library_id: str, entry_id: str) -> Dict[str, Any]:
+    """Fetch a single entry detail for enrichment.
+
+    Tries a few common Memento API paths for compatibility across versions.
+    Returns the parsed JSON dict (or raises for unexpected errors).
+    """
+    base = _base_url().rstrip("/")
+    params = {}
+    params.update(_token_params())
+    # Candidate endpoints (try most likely first)
+    candidates = [
+        f"{base}/libraries/{library_id}/entries/{entry_id}",
+        f"{base}/libraries/{library_id}/entry/{entry_id}",
+        f"{base}/entries/{entry_id}",
+    ]
+    last = None
+    for url in candidates:
+        r = _get_with_backoff(url, params=params, timeout=_timeout())
+        last = r
+        # success
+        if r.status_code < 400:
+            try:
+                return r.json()
+            except Exception:
+                return {"raw": r.text}
+        # try next only on 404
+        if r.status_code != 404:
+            _raise_on_404(r, url)
+            # for non-404 errors, raise a useful exception
+            raise RuntimeError(f"fetch_entry_detail failed: {r.status_code} {r.text[:200]}")
+    # if all candidates 404
+    if last is not None:
+        _raise_on_404(last, candidates[-1])
+    raise RuntimeError("fetch_entry_detail failed: no response")
