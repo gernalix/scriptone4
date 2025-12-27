@@ -1,0 +1,16 @@
+# Esempio di configurazione per import Memento -> SQLite
+token: VU2rRi7hXdmlj9I4hu6BaRg1XMMxlM
+
+default:
+  id_mode: surrogate         # external | surrogate
+  prefer_time: field         # auto | field | created | modified
+  time_column_name: tempo
+  index_second_time: true
+  timezone: Europe/Copenhagen
+  store_time_as: local       # utc | local
+
+libraries:
+  - id: wn8JsQymR
+    table: umore
+  - id: r7JvCKmKc
+    table: ansia
