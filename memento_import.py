@@ -37,12 +37,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- SDK imports (should be the patched one with include=fields) ---
-from memento_sdk import (
-    fetch_all_entries_full as _fetch_full,
-    fetch_incremental as _fetch_inc,
-    fetch_entry_detail as _fetch_detail,
-)
-
+import memento_sdk as _memento_sdk  # patched to avoid circular from-import
+_fetch_full = getattr(_memento_sdk, 'fetch_all_entries_full')
+_fetch_inc = getattr(_memento_sdk, 'fetch_incremental')
+_fetch_detail = getattr(_memento_sdk, 'fetch_entry_detail')
 # ------------------------------
 # Logging
 # ------------------------------
