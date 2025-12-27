@@ -1,3 +1,4 @@
+# v3
 
 # memento_import.py
 # Importer with:
@@ -314,7 +315,9 @@ def _import_section(
     Imports one section from batch config.
     Returns (section_name, inserted_rows)
     """
-    library_id = cfg["library_id"].strip()
+    library_id = (cfg.get("library_id") or cfg.get("library") or "").strip()
+    if not library_id:
+        raise KeyError("library_id (oppure library) mancante nella sezione INI/YAML")
     table      = cfg.get("table", sect).strip()
     tempo_col  = cfg.get("tempo_col", "tempo").strip()
     sync_mode  = (cfg.get("sync","incremental") or "incremental").strip().lower()
