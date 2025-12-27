@@ -1,3 +1,4 @@
+# v1
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import os, sys, re, json, sqlite3
@@ -329,8 +330,8 @@ def memento_elenca_librerie():
     libs=sdk_list_libraries(srv)
     if not libs:
         print("[ERRORE] Nessuna libreria visibile."); return
-    print("[info] Librerie (prime 100):")
-    for i,lib in enumerate(libs[:100],1):
+    print(f"[info] Librerie (totali: {len(libs)}):")
+    for i,lib in enumerate(libs,1):
         lid=str(lib.get("id") or lib.get("uid") or lib.get("uuid") or "?"); name=str(lib.get("name") or "?")
         print(f"  {i:>3}) id={lid} | name={name}")
 
