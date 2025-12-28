@@ -1,11 +1,45 @@
-# v9
+# v10
 import os
 import re
 import json
 import time
 import requests
 import socket
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Iterable, Tuple
+
+
+def _flatten_any(x: Any) -> List[Any]:
+    """Flatten nested lists/tuples into a single list.
+
+    The Memento API (or intermediaries) can occasionally return mixed/odd payloads.
+    This avoids hard failures such as: `'int' object has no attribute 'get'`.
+    """
+    out: List[Any] = []
+
+    def _walk(v: Any):
+        if isinstance(v, (list, tuple)):
+            for z in v:
+                _walk(z)
+        else:
+            out.append(v)
+
+    _walk(x)
+    return out
+
+
+def _only_dicts(seq: Iterable[Any]) -> Tuple[List[Dict[str, Any]], int]:
+    """Return only dict elements, counting how many were discarded."""
+    kept: List[Dict[str, Any]] = []
+    dropped = 0
+    for it in seq:
+        if isinstance(it, dict):
+            kept.append(it)
+        elif it is None:
+            dropped += 1
+        else:
+            # Drop unexpected scalars/objects (e.g., ints) defensively.
+            dropped += 1
+    return kept, dropped
 
 def _get_with_backoff(url, *, params=None, timeout=None, max_tries=8, base_sleep=0.8, max_sleep=20.0):
     import random
@@ -372,7 +406,15 @@ def probe_capabilities(library_id: str):
 
     return caps
 
-def fetch_incremental(library_id: str, *, modified_after_iso: Optional[str] = None, since: Optional[str] = None, limit: int = 200, progress=None):
+def fetch_incremental(
+    library_id: str,
+    *,
+    modified_after_iso: Optional[str] = None,
+    since: Optional[str] = None,
+    limit: int = 200,
+    enrich_details: bool = True,
+    progress=None,
+):
     # Backward-compatible alias: older callers pass `since=...`
     if modified_after_iso is None and since is not None:
         modified_after_iso = since
@@ -403,28 +445,29 @@ def fetch_incremental(library_id: str, *, modified_after_iso: Optional[str] = No
         _raise_on_404(r, f"/libraries/{library_id}/entries")
         data = r.json()
         chunk = (data.get("entries") if isinstance(data, dict) else data) or data
+
+        # Normalize payload into a flat list and keep only dict entries.
+        # This prevents late failures when a stray scalar (e.g., int) appears.
         if isinstance(chunk, dict):
             vals = list(chunk.values())
             if len(vals) == 1 and isinstance(vals[0], list):
                 chunk = vals[0]
             else:
-                flat = []
-                for v in vals:
-                    if isinstance(v, list):
-                        flat.extend(v)
-                    else:
-                        flat.append(v)
-                chunk = flat
-        chunk = chunk or []
+                chunk = vals
+
+        chunk_list = _flatten_any(chunk or [])
+        chunk_dicts, dropped = _only_dicts(chunk_list)
         if progress:
             try:
-                ev = {"rows": len(chunk), "sec": _sec}
+                ev = {"rows": len(chunk_dicts), "sec": _sec}
                 if modified_after_iso:
                     ev["updatedAfter"] = modified_after_iso
+                if dropped:
+                    ev["dropped"] = dropped
                 progress(ev)
             except Exception:
                 pass
-        rows.extend(chunk)
+        rows.extend(chunk_dicts)
 
         token = None
         if isinstance(data, dict):
@@ -461,7 +504,7 @@ def fetch_incremental(library_id: str, *, modified_after_iso: Optional[str] = No
 
         break
 
-    need_detail = rows and isinstance(rows[0], dict) and not rows[0].get("fields")
+    need_detail = bool(enrich_details) and rows and isinstance(rows[0], dict) and not rows[0].get("fields")
     if need_detail:
         total = len(rows)
         out: List[Dict[str, Any]] = []
@@ -471,6 +514,10 @@ def fetch_incremental(library_id: str, *, modified_after_iso: Optional[str] = No
             progress({"phase": "details_start", "total": total})
 
         for i, e in enumerate(rows, start=1):
+            if not isinstance(e, dict):
+                # Defensive: keep anything unexpected without crashing the whole import.
+                continue
+
             eid = e.get("id") or e.get("entry_id")
             if not eid:
                 # keep raw if no id
@@ -486,7 +533,10 @@ def fetch_incremental(library_id: str, *, modified_after_iso: Optional[str] = No
                 resp = _get_with_backoff(durl, params=_token_params(), timeout=_timeout())
                 _raise_on_404(resp, f"/libraries/{library_id}/entries/{eid}")
                 _ensure_ok(resp, f"detail {eid}")
-                out.append(resp.json())
+                payload = resp.json()
+                if not isinstance(payload, dict):
+                    raise RuntimeError(f"Dettaglio non-dict per entry {eid}: {type(payload)}")
+                out.append(payload)
             except Exception as ex:
                 failed_ids.append(str(eid))
                 if progress:

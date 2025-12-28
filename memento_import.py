@@ -1,4 +1,4 @@
-# v11
+# v12
 import os
 import sys
 import time
@@ -86,6 +86,7 @@ def import_library_incremental(
     table: str,
     library_id: str,
     limit: int,
+    enrich_details: bool = True,
 ):
     log(f"Import incremental → libreria={library_id} tabella={table}")
 
@@ -161,6 +162,7 @@ def import_library_incremental(
             library_id=library_id,
             since=checkpoint,
             limit=limit,
+            enrich_details=enrich_details,
             progress=on_progress,
         )
     except Exception as e:
@@ -233,6 +235,8 @@ def run_batch(db_path: str, batch_cfg: Dict[str, Dict[str, Any]]):
 
             sync = cfg.get("sync", "incremental")
             limit = int(cfg.get("limit", 100))
+            # Optional: allow disabling detail enrichment to avoid long waits.
+            enrich_details = str(cfg.get("enrich_details", "true")).strip().lower() not in ("0","false","no","off")
 
             log(
                 f"Sezione [{section}] → tabella '{table}', "
@@ -245,6 +249,7 @@ def run_batch(db_path: str, batch_cfg: Dict[str, Dict[str, Any]]):
                     table=table,
                     library_id=library_id,
                     limit=limit,
+                    enrich_details=enrich_details,
                 )
             else:
                 log_error(f"Modalità sync non supportata: {sync}")
