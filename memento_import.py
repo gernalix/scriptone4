@@ -1,4 +1,4 @@
-# v9
+# v10
 import os
 import sys
 import time
@@ -125,7 +125,7 @@ def import_library_incremental(
 
     if not entries:
         log("Nessuna entry da importare.")
-        return
+        return 0
 
     cur = conn.cursor()
 
@@ -167,12 +167,15 @@ def import_library_incremental(
 
     log(f"Import completato: {inserted} righe totali")
 
+
+    return inserted
 # ---------------------------------------------------------------------
 # Entry point batch
 # ---------------------------------------------------------------------
 
 def run_batch(db_path: str, batch_cfg: Dict[str, Dict[str, Any]]):
     conn = sqlite3.connect(db_path)
+    total_inserted = 0
 
     try:
         for section, cfg in batch_cfg.items():
@@ -190,7 +193,7 @@ def run_batch(db_path: str, batch_cfg: Dict[str, Dict[str, Any]]):
             )
 
             if sync == "incremental":
-                import_library_incremental(
+                total_inserted += import_library_incremental(
                     conn,
                     table=table,
                     library_id=library_id,
@@ -199,8 +202,77 @@ def run_batch(db_path: str, batch_cfg: Dict[str, Dict[str, Any]]):
             else:
                 log_error(f"Modalità sync non supportata: {sync}")
 
+        return total_inserted
     except Exception as e:
         log_error(f"Import batch fallito: {e}")
         raise
     finally:
         conn.close()
+# ---------------------------------------------------------------------
+# Public helper: load batch from INI/YAML and run
+# ---------------------------------------------------------------------
+
+def _load_batch_cfg_from_ini(path: str) -> Dict[str, Dict[str, Any]]:
+    import configparser
+
+    cfgp = configparser.ConfigParser(interpolation=None)
+    read_ok = cfgp.read(path, encoding="utf-8")
+    if not read_ok:
+        raise FileNotFoundError(f"Batch INI non trovato o illeggibile: {path}")
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for section in cfgp.sections():
+        d = dict(cfgp.items(section))
+        # default: table = nome sezione
+        d.setdefault("table", section)
+        out[section] = d
+    return out
+
+def _load_batch_cfg_from_yaml(path: str) -> Dict[str, Dict[str, Any]]:
+    try:
+        import yaml  # type: ignore
+    except Exception as e:
+        raise RuntimeError(
+            "Batch YAML richiesto ma PyYAML non è installato. "
+            "Installa con: pip install pyyaml"
+        ) from e
+
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    if isinstance(data, list):
+        # supporta lista di oggetti {name:..., ...}
+        out: Dict[str, Dict[str, Any]] = {}
+        for i, item in enumerate(data, start=1):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or item.get("section") or f"item{i}")
+            out[name] = {k: v for k, v in item.items() if k not in ("name", "section")}
+            out[name].setdefault("table", name)
+        return out
+
+    if not isinstance(data, dict):
+        raise ValueError("Formato YAML batch non valido: atteso dict o list")
+
+    out2: Dict[str, Dict[str, Any]] = {}
+    for section, cfg in data.items():
+        if not isinstance(cfg, dict):
+            continue
+        d = dict(cfg)
+        d.setdefault("table", section)
+        out2[str(section)] = d
+    return out2
+
+def memento_import_batch(db_path: str, batch_path: str):
+    """
+    Entry point compatibile con il menu:
+    - batch_path può essere .ini / .yaml / .yml
+    Ritorna il numero totale di righe importate.
+    """
+    batch_path = batch_path.strip()
+    if batch_path.lower().endswith((".yaml", ".yml")):
+        batch_cfg = _load_batch_cfg_from_yaml(batch_path)
+    else:
+        batch_cfg = _load_batch_cfg_from_ini(batch_path)
+
+    return run_batch(db_path, batch_cfg)

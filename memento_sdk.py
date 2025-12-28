@@ -1,4 +1,4 @@
-# v5
+# v6
 import os
 import re
 import json
@@ -315,7 +315,11 @@ def probe_capabilities(library_id: str):
 
     return caps
 
-def fetch_incremental(library_id: str, *, modified_after_iso: Optional[str], limit: int = 200, progress=None):
+def fetch_incremental(library_id: str, *, modified_after_iso: Optional[str] = None, since: Optional[str] = None, limit: int = 200, progress=None):
+    # Backward-compatible alias: older callers pass `since=...`
+    if modified_after_iso is None and since is not None:
+        modified_after_iso = since
+
     caps = probe_capabilities(library_id)
     base = _base_url().rstrip("/")
     url = f"{base}/libraries/{library_id}/entries"
