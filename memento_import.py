@@ -1,4 +1,4 @@
-# v14
+# v15
 import os
 import sys
 import time
@@ -59,19 +59,6 @@ def flatten_entries(entries: Any) -> List[Dict]:
 
 # ---------------------------------------------------------------------
 # Sync state (checkpoint)
-def ensure_sync_state_table(conn):
-    """Create checkpoint table if missing."""
-    cur = conn.cursor()
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS memento_sync (
-            library_id TEXT PRIMARY KEY,
-            last_modified_remote TEXT
-        )
-        """
-    )
-    conn.commit()
-
 # ---------------------------------------------------------------------
 
 def load_sync_state(conn, library_id: str):
@@ -304,18 +291,81 @@ def _ensure_table_schema(conn, table: str, headers: List[str], pk: str) -> None:
     conn.commit()
 
 
+def _norm_key(k: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (k or "").strip().lower())
+
+def _collect_fields(entry: Any) -> Dict[str, Any]:
+    """Extract a best-effort {label/name -> value} map from a Memento entry detail."""
+    if not isinstance(entry, dict):
+        return {}
+
+    # Unwrap common envelopes
+    for wrap_key in ("entry", "data", "result"):
+        v = entry.get(wrap_key)
+        if isinstance(v, dict) and ("fields" in v or "values" in v or "fieldValues" in v):
+            entry = v
+            break
+
+    candidates = []
+    for k in ("fields", "values", "fieldValues", "field_values"):
+        v = entry.get(k)
+        if v is not None:
+            candidates.append(v)
+
+    out: Dict[str, Any] = {}
+
+    def put(key: Any, val: Any):
+        if key is None:
+            return
+        key_s = str(key)
+        if key_s not in out:
+            out[key_s] = val
+
+    for cand in candidates:
+        if isinstance(cand, dict):
+            for kk, vv in cand.items():
+                put(kk, vv)
+        elif isinstance(cand, list):
+            for it in cand:
+                if isinstance(it, dict):
+                    # try common shapes
+                    key = it.get("name") or it.get("label") or it.get("field") or it.get("key") or it.get("title") or it.get("id")
+                    val = it.get("value") if "value" in it else it.get("val") if "val" in it else it.get("data") if "data" in it else it.get("text") if "text" in it else it.get("content") if "content" in it else it.get("v")
+                    if val is None and len(it) == 1:
+                        # {"X": 123}
+                        k0 = next(iter(it.keys()))
+                        if k0 not in ("name","label","field","key","title","id"):
+                            key = k0
+                            val = it[k0]
+                    put(key, val)
+
+    # Also include a few top-level keys (id/created/modified) if present
+    for k in ("id", "created", "modified"):
+        if k in entry:
+            put(k, entry.get(k))
+
+    return out
+
 def _entry_to_row(entry: Dict[str, Any], headers: List[str]) -> Dict[str, str]:
-    fields = entry.get("fields") if isinstance(entry, dict) else None
-    if not isinstance(fields, dict):
-        fields = {}
-    out = {}
+    fields_raw = _collect_fields(entry)
+    fields_norm = {_norm_key(k): v for k, v in fields_raw.items()}
+
+    out: Dict[str, str] = {}
     for h in headers:
         v = None
-        if h in fields:
-            v = fields.get(h)
-        elif isinstance(entry, dict) and h in entry:
-            v = entry.get(h)
+        # exact label match
+        if h in fields_raw:
+            v = fields_raw.get(h)
+        else:
+            hn = _norm_key(h)
+            if hn in fields_norm:
+                v = fields_norm.get(hn)
+            elif isinstance(entry, dict) and h in entry:
+                v = entry.get(h)
+            elif isinstance(entry, dict) and hn == "extid" and "id" in entry:
+                v = entry.get("id")
         out[h] = "" if v is None else str(v)
+
     out["raw_json"] = json.dumps(entry, ensure_ascii=False)
     return out
 
