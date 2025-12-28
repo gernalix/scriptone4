@@ -1,4 +1,4 @@
-# v16
+# v17
 import os
 import sys
 import time
@@ -60,6 +60,20 @@ def flatten_entries(entries: Any) -> List[Dict]:
 # ---------------------------------------------------------------------
 # Sync state (checkpoint)
 # ---------------------------------------------------------------------
+
+def ensure_sync_state_table(conn) -> None:
+    """Crea la tabella di checkpoint per gli import incremental (se manca).
+    Mantiene uno stato per library_id -> last_modified_remote."""
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memento_sync (
+            library_id TEXT PRIMARY KEY,
+            last_modified_remote TEXT
+        )
+        """
+    )
+    conn.commit()
 
 def load_sync_state(conn, library_id: str):
     cur = conn.cursor()
