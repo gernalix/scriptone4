@@ -1,3 +1,4 @@
+# v4
 import os
 import re
 import json
@@ -169,7 +170,7 @@ def list_libraries():
         })
     return out
 
-def fetch_all_entries_full(library_id, limit=100):
+def fetch_all_entries_full(library_id, limit=100, *, progress=None):
     import urllib.parse as _up
     base = _base_url().rstrip("/")
     url = f"{base}/libraries/{library_id}/entries"
@@ -187,10 +188,20 @@ def fetch_all_entries_full(library_id, limit=100):
 
     all_rows = []
     while True:
+        _t0 = time.time()
+
         r = _get_with_backoff(url, params=params, timeout=_timeout())
+
+        _sec = round(time.time() - _t0, 3)
         _raise_on_404(r, f"/libraries/{library_id}/entries")
         data = r.json()
         rows = _listify(data) or []
+
+        if progress:
+            try:
+                progress({"rows": len(rows), "sec": _sec})
+            except Exception:
+                pass
 
         if rows and isinstance(rows[0], dict) and not rows[0].get("fields"):
             rows2 = []
@@ -294,7 +305,7 @@ def probe_capabilities(library_id: str):
 
     return caps
 
-def fetch_incremental(library_id: str, *, modified_after_iso: Optional[str], limit: int = 200):
+def fetch_incremental(library_id: str, *, modified_after_iso: Optional[str], limit: int = 200, progress=None):
     caps = probe_capabilities(library_id)
     base = _base_url().rstrip("/")
     url = f"{base}/libraries/{library_id}/entries"
@@ -312,13 +323,25 @@ def fetch_incremental(library_id: str, *, modified_after_iso: Optional[str], lim
 
     rows = []
     while True:
+        _t0 = time.time()
+
         r = _get_with_backoff(url, params=params, timeout=_timeout())
+
+        _sec = round(time.time() - _t0, 3)
         _raise_on_404(r, f"/libraries/{library_id}/entries")
         data = r.json()
         chunk = (data.get("entries") if isinstance(data, dict) else data) or data
         if isinstance(chunk, dict):
             chunk = list(chunk.values())
         chunk = chunk or []
+        if progress:
+            try:
+                ev = {"rows": len(chunk), "sec": _sec}
+                if modified_after_iso:
+                    ev["updatedAfter"] = modified_after_iso
+                progress(ev)
+            except Exception:
+                pass
         rows.extend(chunk)
 
         token = None

@@ -1,5 +1,4 @@
-# v3
-
+# v6
 # memento_import.py
 # Importer with:
 # - "enrich only NEW or MODIFIED rows" logic
@@ -171,13 +170,31 @@ def _fetch_with_logs(kind: str, library_id: str, limit: int, last_iso: Optional[
     pages = 0
     total = 0
 
-    def on_page(ev: Dict[str, Any]):
+    def on_page(ev: Any):
+        """Progress callback.
+        Can receive either a dict (preferred) or a plain list/tuple from older SDK code."""
         nonlocal pages, total
         pages += 1
-        total += int(ev.get("rows", 0))
+
+        rows = 0
+        sec = "?"
+        updated_after = None
+
+        if isinstance(ev, dict):
+            rows = int(ev.get("rows", 0) or 0)
+            sec = ev.get("sec", "?")
+            updated_after = ev.get("updatedAfter")
+        elif isinstance(ev, (list, tuple)):
+            # Some implementations may pass the page chunk directly.
+            rows = len(ev)
+        else:
+            # Unknown payload type; just show it.
+            rows = 0
+
+        total += rows
         tag = "incremental" if kind == "incremental" else "full"
-        extra = f" (updatedAfter={ev['updatedAfter']})" if "updatedAfter" in ev else ""
-        _log(f"[{tag}] Pagina {pages} — {ev.get('rows', 0)} righe in {ev.get('sec','?')}s{extra}")
+        extra = f" (updatedAfter={updated_after})" if updated_after else ""
+        _log(f"[{tag}] Pagina {pages} — {rows} righe in {sec}s{extra}")
 
     if kind == "incremental":
         rows = _fetch_inc(library_id, modified_after_iso=last_iso, limit=limit, progress=on_page)
@@ -315,9 +332,7 @@ def _import_section(
     Imports one section from batch config.
     Returns (section_name, inserted_rows)
     """
-    library_id = (cfg.get("library_id") or cfg.get("library") or "").strip()
-    if not library_id:
-        raise KeyError("library_id (oppure library) mancante nella sezione INI/YAML")
+    library_id = cfg["library_id"].strip()
     table      = cfg.get("table", sect).strip()
     tempo_col  = cfg.get("tempo_col", "tempo").strip()
     sync_mode  = (cfg.get("sync","incremental") or "incremental").strip().lower()
