@@ -1,4 +1,4 @@
-# v4
+# v5
 import os
 import re
 import json
@@ -183,7 +183,17 @@ def fetch_all_entries_full(library_id, limit=100, *, progress=None):
         else:
             items = data
         if isinstance(items, dict):
-            items = list(items.values())
+            vals = list(items.values())
+            if len(vals) == 1 and isinstance(vals[0], list):
+                items = vals[0]
+            else:
+                flat = []
+                for v in vals:
+                    if isinstance(v, list):
+                        flat.extend(v)
+                    else:
+                        flat.append(v)
+                items = flat
         return items
 
     all_rows = []
@@ -332,7 +342,17 @@ def fetch_incremental(library_id: str, *, modified_after_iso: Optional[str], lim
         data = r.json()
         chunk = (data.get("entries") if isinstance(data, dict) else data) or data
         if isinstance(chunk, dict):
-            chunk = list(chunk.values())
+            vals = list(chunk.values())
+            if len(vals) == 1 and isinstance(vals[0], list):
+                chunk = vals[0]
+            else:
+                flat = []
+                for v in vals:
+                    if isinstance(v, list):
+                        flat.extend(v)
+                    else:
+                        flat.append(v)
+                chunk = flat
         chunk = chunk or []
         if progress:
             try:
