@@ -1,4 +1,4 @@
-# v13
+# v14
 import os
 import sys
 import time
@@ -59,6 +59,19 @@ def flatten_entries(entries: Any) -> List[Dict]:
 
 # ---------------------------------------------------------------------
 # Sync state (checkpoint)
+def ensure_sync_state_table(conn):
+    """Create checkpoint table if missing."""
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memento_sync (
+            library_id TEXT PRIMARY KEY,
+            last_modified_remote TEXT
+        )
+        """
+    )
+    conn.commit()
+
 # ---------------------------------------------------------------------
 
 def load_sync_state(conn, library_id: str):

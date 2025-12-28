@@ -1,0 +1,9 @@
+{
+  "libido": {
+    "enrich_details": true,
+    "signature": "4f1893ae186c",
+    "decided_at": "2025-12-28T07:07:02",
+    "reason": "list_missing_fields",
+    "csv_member": "libido .csv"
+  }
+}
