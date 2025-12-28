@@ -1,4 +1,4 @@
-# v10
+# v11
 import os
 import sys
 import time
@@ -97,13 +97,60 @@ def import_library_incremental(
 
     all_entries: List[Dict] = []
 
+    last_details_pct = -1
+    last_details_t = 0.0
+
     def on_progress(ev):
         # ev può essere dict o list
+        nonlocal last_details_pct, last_details_t
+        if isinstance(ev, dict) and ev.get("phase") in ("details_start", "details", "detail_failed", "details_summary"):
+            phase = ev.get("phase")
+            total = int(ev.get("total") or 0)
+            done = int(ev.get("done") or 0)
+            failed = int(ev.get("failed") or 0)
+
+            if phase == "details_start" and total:
+                log(f"[details] Inizio arricchimento: {total} entry (GET dettaglio per ognuna)")
+                return
+
+            if total:
+                pct = int((done / total) * 100)
+            else:
+                pct = -1
+
+            now = time.time()
+            # Throttle: stampa solo se cambia la % o passano 2s, o se è un errore / fine
+            must = False
+            if phase in ("detail_failed", "details_summary"):
+                must = True
+            elif pct != last_details_pct:
+                must = True
+            elif (now - last_details_t) >= 2.0:
+                must = True
+
+            if must:
+                if pct >= 0:
+                    log(f"[details] {done}/{total} ({pct}%)  fallite={failed}")
+                else:
+                    log(f"[details] done={done} total={total} fallite={failed}")
+                last_details_pct = pct
+                last_details_t = now
+
+            # Per gli errori, stampa una riga breve (senza spam)
+            if phase == "detail_failed":
+                eid = ev.get("entry_id", "?")
+                err = ev.get("error", "")
+                log_error(f"Dettaglio entry fallito (skip) id={eid}: {err}")
+            return
+
         if isinstance(ev, dict):
             rows = ev.get("rows")
             page = ev.get("page")
             sec = ev.get("seconds")
-            log(f"[incremental] Pagina {page} — {rows} righe in {sec:.3f}s")
+            if rows is not None and page is not None and sec is not None:
+                log(f"[incremental] Pagina {page} — {rows} righe in {sec:.3f}s")
+            else:
+                log(f"[incremental] Progress: {ev}")
         elif isinstance(ev, list):
             log(f"[incremental] Chunk grezzo: {len(ev)} elementi")
         else:

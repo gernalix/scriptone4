@@ -1,4 +1,4 @@
-# v8
+# v9
 import os
 import re
 import json
@@ -18,7 +18,8 @@ def _get_with_backoff(url, *, params=None, timeout=None, max_tries=8, base_sleep
             _p = dict(params or {})
             if "token" in _p:
                 _p["token"] = "***"
-            _log(f"SDK → GET {url} params={_p} try={tries+1}/{max_tries}")
+            if _debug_http():
+                _log(f"SDK → GET {url} params={_p} try={tries+1}/{max_tries}")
             r = requests.get(url, params=params or {}, timeout=timeout or _timeout())
             if r.status_code < 400 or r.status_code in (400,401,403,404):
                 return r
@@ -142,6 +143,11 @@ def _log(msg: str):
         # Never fail due to logging
         pass
 
+
+
+def _debug_http() -> bool:
+    v = str(os.environ.get("MEMENTO_DEBUG_HTTP", "0")).strip().lower()
+    return v in ("1","true","yes","on")
 def _timeout():
     """Return requests timeout.
     Supports:
@@ -176,6 +182,22 @@ def _raise_on_404(r: requests.Response, path: str):
         raise RuntimeError(f"Memento API ha risposto 404 su {path}. URL: {r.request.method} {r.url}\nStatus: {r.status_code}\nBody: {r.text}")
     r.raise_for_status()
 
+
+
+def _ensure_ok(resp, context: str):
+    try:
+        code = int(getattr(resp, "status_code", 0))
+    except Exception:
+        code = 0
+    if code >= 400:
+        txt = ""
+        try:
+            txt = getattr(resp, "text", "")
+        except Exception:
+            txt = ""
+        txt = (txt or "").replace("\n", " ")
+        raise RuntimeError(f"HTTP {code} during {context}: {txt[:200]}")
+    return resp
 def list_libraries():
     url = f"{_base_url().rstrip('/')}/libraries"
     r = _get_with_backoff(url, params=_token_params(), timeout=_timeout())
@@ -375,6 +397,7 @@ def fetch_incremental(library_id: str, *, modified_after_iso: Optional[str] = No
         _t0 = time.time()
 
         r = _get_with_backoff(url, params=params, timeout=_timeout())
+        _ensure_ok(r, f"list entries for {library_id}")
 
         _sec = round(time.time() - _t0, 3)
         _raise_on_404(r, f"/libraries/{library_id}/entries")
@@ -440,16 +463,49 @@ def fetch_incremental(library_id: str, *, modified_after_iso: Optional[str] = No
 
     need_detail = rows and isinstance(rows[0], dict) and not rows[0].get("fields")
     if need_detail:
-        out = []
-        for e in rows[-500:]:
+        total = len(rows)
+        out: List[Dict[str, Any]] = []
+        failed_ids: List[str] = []
+
+        if progress:
+            progress({"phase": "details_start", "total": total})
+
+        for i, e in enumerate(rows, start=1):
             eid = e.get("id") or e.get("entry_id")
             if not eid:
-                out.append(e); continue
+                # keep raw if no id
+                out.append(e)
+                continue
+
+            # progress tick (throttled by caller if desired)
+            if progress and (i == 1 or i == total or i % 25 == 0):
+                progress({"phase": "details", "done": i - 1, "total": total, "failed": len(failed_ids)})
+
             durl = f"{base}/libraries/{library_id}/entries/{eid}"
-            d = _get_with_backoff(durl, params=_token_params(), timeout=_timeout())
-            _raise_on_404(d, f"/libraries/{library_id}/entries/{eid}")
-            out.append(d.json())
+            try:
+                resp = _get_with_backoff(durl, params=_token_params(), timeout=_timeout())
+                _raise_on_404(resp, f"/libraries/{library_id}/entries/{eid}")
+                _ensure_ok(resp, f"detail {eid}")
+                out.append(resp.json())
+            except Exception as ex:
+                failed_ids.append(str(eid))
+                if progress:
+                    progress({
+                        "phase": "detail_failed",
+                        "entry_id": str(eid),
+                        "done": i,
+                        "total": total,
+                        "failed": len(failed_ids),
+                        "error": str(ex)[:200],
+                    })
+                # Skip this entry and continue import
+                continue
+
         rows = out
+        if progress:
+            progress({"phase": "details", "done": total, "total": total, "failed": len(failed_ids)})
+            if failed_ids:
+                progress({"phase": "details_summary", "total": total, "failed": len(failed_ids)}) 
 
     return rows
 
