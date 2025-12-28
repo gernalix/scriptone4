@@ -1,9 +1,10 @@
-# v6
+# v8
 import os
 import re
 import json
 import time
 import requests
+import socket
 from typing import Dict, Any, List, Optional
 
 def _get_with_backoff(url, *, params=None, timeout=None, max_tries=8, base_sleep=0.8, max_sleep=20.0):
@@ -13,6 +14,11 @@ def _get_with_backoff(url, *, params=None, timeout=None, max_tries=8, base_sleep
     last_exc = None
     while tries < max_tries:
         try:
+            # Redact token from logs
+            _p = dict(params or {})
+            if "token" in _p:
+                _p["token"] = "***"
+            _log(f"SDK → GET {url} params={_p} try={tries+1}/{max_tries}")
             r = requests.get(url, params=params or {}, timeout=timeout or _timeout())
             if r.status_code < 400 or r.status_code in (400,401,403,404):
                 return r
@@ -126,11 +132,40 @@ def _base_url() -> str:
     u = _cfg_get("memento.api_url", "https://api.mementodatabase.com/v1")
     return _sanitize_url(u or "" )
 
-def _timeout() -> int:
+def _ts() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+def _log(msg: str):
     try:
-        return int(_cfg_get("memento.timeout", 20))
+        print(f"[{_ts()}] {msg}")
     except Exception:
-        return 20
+        # Never fail due to logging
+        pass
+
+def _timeout():
+    """Return requests timeout.
+    Supports:
+      - memento.connect_timeout / env MEMENTO_CONNECT_TIMEOUT
+      - memento.read_timeout    / env MEMENTO_READ_TIMEOUT
+      - legacy memento.timeout  / env MEMENTO_TIMEOUT (read timeout)
+    """
+    def _to_int(val, default):
+        try:
+            return int(val)
+        except Exception:
+            return default
+
+    legacy_read = _to_int(_cfg_get("memento.timeout", 20), 20)
+    connect = _to_int(_cfg_get("memento.connect_timeout", min(10, legacy_read)), min(10, legacy_read))
+    read = _to_int(_cfg_get("memento.read_timeout", legacy_read), legacy_read)
+
+    # Apply a global socket timeout as an extra guard (Windows DNS/TLS stalls)
+    try:
+        socket.setdefaulttimeout(max(connect, read) + 5)
+    except Exception:
+        pass
+
+    return (connect, read)
 
 def _token_params() -> Dict[str, Any]:
     token = _cfg_get("memento.token", "").strip()
