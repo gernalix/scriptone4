@@ -1,4 +1,4 @@
-# v10
+# v11
 import os
 import re
 import json
@@ -405,6 +405,148 @@ def probe_capabilities(library_id: str):
         caps["accepts_pageToken"] = True
 
     return caps
+
+def fetch_incremental_pages(
+    library_id: str,
+    *,
+    modified_after_iso: Optional[str] = None,
+    since: Optional[str] = None,
+    limit: int = 200,
+    enrich_details: bool = True,
+    progress=None,
+):
+    """
+    Generator: scarica le entry incremental "pagina per pagina".
+    Utile per fare commit per pagina lato importer.
+    Yields: List[Dict[str, Any]] (una pagina / chunk).
+    """
+    # Backward-compatible alias
+    if modified_after_iso is None and since is not None:
+        modified_after_iso = since
+
+    caps = probe_capabilities(library_id)
+    base = _base_url().rstrip("/")
+    url = f"{base}/libraries/{library_id}/entries"
+
+    params = _token_params().copy()
+    params["limit"] = int(limit)
+
+    if modified_after_iso and caps.get("accepts_updatedAfter"):
+        params["updatedAfter"] = modified_after_iso
+    elif modified_after_iso:
+        # Some backends might accept it anyway
+        params["updatedAfter"] = modified_after_iso
+
+    # Prefer server-side sort if supported
+    if caps.get("accepts_sort") and caps.get("sort_key"):
+        params["sort"] = caps["sort_key"]
+
+    token = None
+    while True:
+        if token:
+            params["pageToken"] = token
+
+        t0 = time.time()
+        r = _get_with_backoff(url, params=params, timeout=_timeout())
+        _sec = round(time.time() - t0, 3)
+
+        if r.status_code >= 400:
+            raise RuntimeError(f"HTTP {r.status_code} {r.text[:200]}")
+
+        data = r.json()
+
+        # Normalize rows
+        rows = []
+        if isinstance(data, dict):
+            rows = data.get("entries") or data.get("data") or data.get("rows") or []
+        elif isinstance(data, list):
+            rows = data
+        else:
+            rows = []
+
+        # Flatten and keep only dicts
+        chunk_dicts: List[Dict[str, Any]] = []
+        dropped = 0
+        for x in rows:
+            if isinstance(x, dict):
+                chunk_dicts.append(x)
+            elif isinstance(x, list):
+                for y in x:
+                    if isinstance(y, dict):
+                        chunk_dicts.append(y)
+                    else:
+                        dropped += 1
+            else:
+                dropped += 1
+
+        if progress:
+            try:
+                ev = {"rows": len(chunk_dicts), "sec": _sec}
+                if modified_after_iso:
+                    ev["updatedAfter"] = modified_after_iso
+                if dropped:
+                    ev["dropped"] = dropped
+                progress(ev)
+            except Exception:
+                pass
+
+        if not chunk_dicts:
+            break
+
+        # Optional enrichment on this page only
+        need_detail = bool(enrich_details) and chunk_dicts and isinstance(chunk_dicts[0], dict) and not chunk_dicts[0].get("fields")
+        if need_detail:
+            total = len(chunk_dicts)
+            out: List[Dict[str, Any]] = []
+            failed_ids: List[str] = []
+            if progress:
+                try:
+                    progress({"phase": "details_start", "total": total})
+                except Exception:
+                    pass
+
+            for i, e in enumerate(chunk_dicts, start=1):
+                try:
+                    det = fetch_entry_detail(library_id, str(e.get("id")))
+                    if isinstance(det, dict):
+                        out.append(det)
+                    else:
+                        failed_ids.append(str(e.get("id")))
+                except Exception as ex:
+                    failed_ids.append(str(e.get("id")))
+                    if progress:
+                        try:
+                            progress({
+                                "phase": "detail_failed",
+                                "done": i,
+                                "total": total,
+                                "failed": len(failed_ids),
+                                "error": str(ex)[:200],
+                            })
+                        except Exception:
+                            pass
+                    continue
+                if progress and (i % 25 == 0 or i == total):
+                    try:
+                        progress({"phase": "details", "done": i, "total": total, "failed": len(failed_ids)})
+                    except Exception:
+                        pass
+
+            chunk_dicts = out
+            if progress:
+                try:
+                    progress({"phase": "details_summary", "total": total, "failed": len(failed_ids)})
+                except Exception:
+                    pass
+
+        yield chunk_dicts
+
+        token = None
+        if isinstance(data, dict):
+            token = data.get("nextPageToken") or data.get("next_page_token") or data.get("continuation") or data.get("continuationToken")
+        if not token:
+            break
+
 
 def fetch_incremental(
     library_id: str,

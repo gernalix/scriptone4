@@ -1,0 +1,143 @@
+{
+  "libido": [
+    "libido",
+    "quando",
+    "note"
+  ],
+  "location": [
+    "descrizione",
+    "luogo",
+    "ora",
+    "logseq id",
+    "indirizzo",
+    "distanza da casa"
+  ],
+  "overdose_t": [
+    "data",
+    "sintomi"
+  ],
+  "pant": [
+    "dove",
+    "quando",
+    "soldi"
+  ],
+  "parole_inesistenti": [
+    "parola",
+    "data"
+  ],
+  "parole": [
+    "parola",
+    "data"
+  ],
+  "pento_di_droghe": [
+    "quando",
+    "mi pento"
+  ],
+  "perdo": [
+    "cosa",
+    "quando"
+  ],
+  "pressione": [
+    "alta",
+    "bassa",
+    "quando"
+  ],
+  "rado_barba": [
+    "data"
+  ],
+  "riscaldamento": [
+    "inizio",
+    "fine",
+    "livello"
+  ],
+  "rubo": [
+    "cosa",
+    "dove",
+    "quando"
+  ],
+  "sega": [
+    "quando",
+    "dildo",
+    "droghe"
+  ],
+  "sfide": [
+    "sfida",
+    "durata",
+    "quando",
+    "vinta",
+    "tentativi",
+    "difficoltà"
+  ],
+  "sogni": [
+    "cosa",
+    "quando",
+    "buono/cattivo"
+  ],
+  "t_puff": [
+    "quando"
+  ],
+  "t_rimasta": [
+    "quantità",
+    "quando",
+    "con bustina",
+    "busta"
+  ],
+  "taglio_unghie": [
+    "quando"
+  ],
+  "tempo_perc": [
+    "percepito",
+    "reale",
+    "ratio",
+    "quando",
+    "tipo"
+  ],
+  "trovo": [
+    "cosa",
+    "quando"
+  ],
+  "umore": [
+    "umore",
+    "tempo",
+    "note"
+  ],
+  "ascensore_rotto": [
+    "quando"
+  ],
+  "barbiere": [
+    "quando",
+    "note"
+  ],
+  "cacca": [
+    "tempo",
+    "come",
+    "passate"
+  ],
+  "craving": [
+    "craving",
+    "data",
+    "note"
+  ],
+  "douching": [
+    "inizio",
+    "fine",
+    "successo"
+  ],
+  "ducray": [
+    "ora"
+  ],
+  "forza": [
+    "voto",
+    "quando"
+  ],
+  "g": [
+    "quantità",
+    "quando"
+  ],
+  "idratante": [
+    "quando"
+  ],
+  "lavatrice": [
+    "quando"
+  ]
+}
