@@ -1,4 +1,4 @@
-# v15
+# v16
 import os
 import sys
 import time
@@ -330,7 +330,7 @@ def _collect_fields(entry: Any) -> Dict[str, Any]:
                 if isinstance(it, dict):
                     # try common shapes
                     key = it.get("name") or it.get("label") or it.get("field") or it.get("key") or it.get("title") or it.get("id")
-                    val = it.get("value") if "value" in it else it.get("val") if "val" in it else it.get("data") if "data" in it else it.get("text") if "text" in it else it.get("content") if "content" in it else it.get("v")
+                    val = it.get("value") if "value" in it else it.get("val") if "val" in it else it.get("content") if "content" in it else it.get("v")
                     if val is None and len(it) == 1:
                         # {"X": 123}
                         k0 = next(iter(it.keys()))
@@ -556,17 +556,42 @@ def import_library_incremental(
     page_no = 0
 
     def _insert_chunk(chunk: List[Dict[str, Any]]):
-        nonlocal inserted
+        """Inserisce una pagina (chunk) in modo atomico.
+        Se enrich_details=True e il mapping produce righe vuote (tutte colonne CSV vuote), interrompe subito.
+        """
         cur = conn.cursor()
         cols = headers + ["raw_json"]
         placeholders = ", ".join(["?"] * len(cols))
         col_sql = ", ".join([f'"{c}"' for c in cols])
         sql = f'INSERT OR REPLACE INTO "{table}" ({col_sql}) VALUES ({placeholders})'
-        vals = []
-        for e in chunk:
-            row = _entry_to_row(e, headers)
-            vals.append([row.get(c, "") for c in cols])
-        cur.executemany(sql, vals)
+
+        conn.execute("SAVEPOINT memento_page")
+        try:
+            vals = []
+            for e in chunk:
+                row = _entry_to_row(e, headers)
+
+                if enrich_details:
+                    # Fail-fast: non ha senso continuare a scrivere righe vuote fino alla fine
+                    has_any = False
+                    for h in headers:
+                        vv = row.get(h, "")
+                        if vv is None:
+                            vv = ""
+                        if str(vv).strip() != "":
+                            has_any = True
+                            break
+                    if not has_any:
+                        raise RuntimeError("fields vuoti dopo enrichment")
+
+                vals.append([row.get(c, "") for c in cols])
+
+            cur.executemany(sql, vals)
+            conn.execute("RELEASE SAVEPOINT memento_page")
+        except Exception:
+            conn.execute("ROLLBACK TO SAVEPOINT memento_page")
+            conn.execute("RELEASE SAVEPOINT memento_page")
+            raise
 
     t0 = time.time()
     for chunk in fetch_incremental_pages(
